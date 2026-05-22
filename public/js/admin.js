@@ -48,6 +48,66 @@ function applyRoleRestrictions() {
 
 // --- MARKETING CONFIGURATION MANAGEMENT ---
 window.levelMarketingData = {};
+window.salesLabelsData = {
+    prelogin: {}, level_2_status: {}, level_3_status: {}, level_4_status: {}
+};
+
+window.loadSalesLabelsConfig = function() {
+    if (window.appSettings && window.appSettings.daily_sales_labels && Object.keys(window.salesLabelsData.prelogin).length === 0) {
+        try { 
+            const parsed = JSON.parse(window.appSettings.daily_sales_labels); 
+            // Fallback for legacy flat config
+            if (parsed.Mon !== undefined) {
+                window.salesLabelsData.prelogin = parsed; 
+            } else {
+                window.salesLabelsData = { ...window.salesLabelsData, ...parsed };
+            }
+        } catch(e){}
+    }
+    
+    const targetSelect = document.getElementById('salesLabelTargetSelect');
+    if (!targetSelect) return;
+    const target = targetSelect.value;
+    const data = window.salesLabelsData[target] || {};
+
+    const safeSet = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    safeSet('adminLabelMon', data.Mon);
+    safeSet('adminLabelTue', data.Tue);
+    safeSet('adminLabelWed', data.Wed);
+    safeSet('adminLabelThu', data.Thu);
+    safeSet('adminLabelFri', data.Fri);
+    safeSet('adminLabelSat', data.Sat);
+    safeSet('adminLabelSun', data.Sun);
+};
+
+window.saveSalesLabelsLocally = function(event) {
+    const targetSelect = document.getElementById('salesLabelTargetSelect');
+    if (!targetSelect) return;
+    const target = targetSelect.value;
+    
+    window.salesLabelsData[target] = {
+        Mon: document.getElementById('adminLabelMon')?.value || '',
+        Tue: document.getElementById('adminLabelTue')?.value || '',
+        Wed: document.getElementById('adminLabelWed')?.value || '',
+        Thu: document.getElementById('adminLabelThu')?.value || '',
+        Fri: document.getElementById('adminLabelFri')?.value || '',
+        Sat: document.getElementById('adminLabelSat')?.value || '',
+        Sun: document.getElementById('adminLabelSun')?.value || ''
+    };
+
+    const warning = document.getElementById('salesLabelWarning');
+    if (warning) warning.style.display = 'block';
+
+    if (event && event.target) {
+        const btn = event.target;
+        btn.classList.replace('btn-dark', 'btn-success');
+        btn.innerText = "Saved!";
+        setTimeout(() => { 
+            btn.classList.replace('btn-success', 'btn-dark'); 
+            btn.innerText = "Save Labels For This Popup"; 
+        }, 1500);
+    }
+};
 
 window.loadMarketingConfig = function() {
     if (window.appSettings && window.appSettings.level_marketing_config && Object.keys(window.levelMarketingData).length === 0) {
@@ -109,6 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             // Load marketing configuration values if the element exists
             if (typeof window.loadMarketingConfig === 'function') window.loadMarketingConfig();
+            if (typeof window.loadSalesLabelsConfig === 'function') window.loadSalesLabelsConfig();
         });
     }
 });
@@ -118,6 +179,10 @@ if (formAdminSettings) {
     formAdminSettings.addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = e.target.querySelector('button'); btn.innerText = "Saving..."; btn.disabled = true;
+        
+        // FIX: Force capture the currently typed values in the Marketing & Labels tabs before saving
+        if (typeof window.saveMarketingConfigLocally === 'function') window.saveMarketingConfigLocally();
+        if (typeof window.saveSalesLabelsLocally === 'function') window.saveSalesLabelsLocally();
         
         const state = document.getElementById('adminAccordionState')?.value || 'first';
         const hideTrade = document.getElementById('adminHideTradeTab')?.checked ? 'true' : 'false';
@@ -145,6 +210,14 @@ if (formAdminSettings) {
         const login_popup_btn_text = document.getElementById('adminLoginPopupBtnText')?.value || '';
         const login_popup_btn_link = document.getElementById('adminLoginPopupBtnLink')?.value || '';
         
+        // AUTOMATED DAILY SALES LABELS
+        let salesLabelsStr = undefined;
+        if (window.salesLabelsData && Object.keys(window.salesLabelsData).length > 0) {
+            salesLabelsStr = JSON.stringify(window.salesLabelsData);
+        } else if (window.appSettings && window.appSettings.daily_sales_labels) {
+            salesLabelsStr = window.appSettings.daily_sales_labels;
+        }
+
         let homepage_layout = undefined;
         const layoutList = document.querySelectorAll('#homepageLayoutDraggable li');
         if (layoutList.length > 0) {
@@ -185,6 +258,7 @@ if (formAdminSettings) {
             };
             if (homepage_layout) bodyData.homepage_layout = homepage_layout;
             if (marketingConfigStr !== undefined) bodyData.level_marketing_config = marketingConfigStr;
+            if (salesLabelsStr !== undefined) bodyData.daily_sales_labels = salesLabelsStr;
 
             const res = await fetch('/api/admin/settings', { 
                 method: 'PUT', 
