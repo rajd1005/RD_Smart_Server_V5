@@ -4,15 +4,7 @@ window.getTodaySalesLabel = function(settingsObj, level) {
     try {
         let labels = JSON.parse(settingsObj.daily_sales_labels);
         
-        // Contextually locate label data
-        if (level && labels[level]) {
-            labels = labels[level];
-        } else if (labels.prelogin !== undefined) {
-            // New format detected, but specific level doesn't exist. Fallback empty.
-            return '';
-        }
-
-        // FIX: Cross-browser safe IST Date Calculation (Fixes iOS/Safari 'Invalid Date' bug)
+        // Cross-browser safe IST Date Calculation
         const now = new Date();
         const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
         const istOffset = 5.5 * 60 * 60 * 1000; // +5:30 IST
@@ -21,7 +13,20 @@ window.getTodaySalesLabel = function(settingsObj, level) {
         const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
         const currentISTDay = days[istDate.getDay()];
         
-        return labels[currentISTDay] || '';
+        // Ensure clean string for matching
+        const cleanLevel = level ? String(level).trim() : '';
+
+        // Contextually locate label data
+        let targetLabels = {};
+        if (cleanLevel && labels[cleanLevel]) {
+            targetLabels = labels[cleanLevel];
+        } else if (labels.prelogin !== undefined) {
+            targetLabels = {}; // Structure exists, but specific level is empty
+        } else {
+            targetLabels = labels; // Fallback to legacy flat format
+        }
+
+        return targetLabels[currentISTDay] || '';
     } catch(e) {
         return '';
     }
@@ -243,6 +248,12 @@ async function fetchCourses() {
             
             // Store globally for marketing popups
             window.appSettings = settings;
+            
+            // Pre-load Admin UI silently to guarantee data persistence
+            if (userData.role === 'admin') {
+                if (typeof window.loadSalesLabelsConfig === 'function') window.loadSalesLabelsConfig();
+                if (typeof window.loadMarketingConfig === 'function') window.loadMarketingConfig();
+            }
 
             const defaultState = settings.accordion_state || 'first';
             setTimeout(() => { toggleAccordions(defaultState); }, 100);
@@ -457,63 +468,58 @@ function moveWatermark() {
     wmEl.style.top = Math.floor(Math.random() * (maxY - minY + 1)) + minY + 'px';
 }
 
-// Marketing Modal logic natively integrated
+// Fixed Modal DOM Caching Injection
 window.showUpgradeMarketingModal = function(level) {
+    const cleanLevel = level ? String(level).trim() : '';
     let mktData = { display_name: 'Premium', benefits: 'Unlock exclusive content.', button_text: 'Upgrade Now', button_link: '#' };
     
     if (window.appSettings && window.appSettings.level_marketing_config) {
         try {
             const config = JSON.parse(window.appSettings.level_marketing_config);
-            if (config[level]) mktData = config[level];
+            if (config[cleanLevel]) mktData = config[cleanLevel];
         } catch(e) {}
     }
 
     let todaySaleText = '';
     if (window.getTodaySalesLabel) {
-        todaySaleText = window.getTodaySalesLabel(window.appSettings, level);
+        todaySaleText = window.getTodaySalesLabel(window.appSettings, cleanLevel);
     }
 
+    // Forcefully remove old modal to prevent cross-level DOM caching issues
     let modalEl = document.getElementById('marketingUpgradeModal');
-    if (!modalEl) {
-        const modalHtml = `
-        <div class="modal fade" id="marketingUpgradeModal" tabindex="-1">
-            <div class="modal-dialog modal-dialog-centered" style="max-width: 320px;">
-                <div class="modal-content text-center">
-                    <div class="modal-header border-0 pb-0 justify-content-center">
-                        <span class="material-icons-round text-warning" style="font-size: 48px;">workspace_premium</span>
-                        <button type="button" class="btn-close position-absolute top-0 end-0 m-3" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body px-4 pb-4 pt-2">
-                        <h5 class="fw-bold mb-1" id="mktModalTitle">Upgrade Access</h5>
-                        <div id="mktModalSaleBadgeContainer"></div>
-                        <p class="text-muted small mb-3" id="mktModalDesc">Get access to this locked content.</p>
-                        <a href="#" target="_blank" class="btn btn-warning w-100 fw-bold shadow-sm text-dark" id="mktModalBtn">Upgrade Now</a>
-                    </div>
+    if (modalEl) {
+        modalEl.remove(); 
+    }
+
+    // Render Badge Natively inside Template Literal
+    const badgeHtml = (todaySaleText && todaySaleText.trim() !== '') ? 
+        `<div class="badge bg-danger text-white mb-3 p-2 px-3 w-100 shadow-sm" style="font-size: 13px; border-radius: 6px; animation: pulse 2s infinite;">🔥 ${todaySaleText}</div>` : '';
+
+    const benefitsHtml = (mktData.benefits || '').split('\n').filter(b => b.trim() !== '').map(b => `<div class="mb-2 text-start d-flex align-items-start" style="font-size: 13px;"><span class="material-icons-round text-success align-middle me-2" style="font-size:16px; margin-top:1px;">check_circle</span><span style="line-height:1.4;">${b}</span></div>`).join('');
+
+    const modalHtml = `
+    <div class="modal fade" id="marketingUpgradeModal" tabindex="-1" style="z-index: 1060;">
+        <div class="modal-dialog modal-dialog-centered" style="max-width: 320px;">
+            <div class="modal-content text-center" style="border-radius: 12px; border: none; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                <div class="modal-header border-0 pb-0 justify-content-center position-relative">
+                    <span class="material-icons-round text-warning" style="font-size: 48px; margin-top: 10px;">workspace_premium</span>
+                    <button type="button" class="btn-close position-absolute top-0 end-0 m-3" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body px-4 pb-4 pt-2">
+                    <h5 class="fw-bold mb-1" id="mktModalTitle" style="font-size: 18px;">${mktData.display_name || 'Upgrade Access'}</h5>
+                    
+                    <div id="mktModalSaleBadgeContainer" class="mt-2">${badgeHtml}</div>
+                    
+                    <div class="text-muted small mb-3 mt-2" id="mktModalDesc">${benefitsHtml || 'Get access to this locked content.'}</div>
+                    <a href="${mktData.button_link || '#'}" target="_blank" class="btn btn-warning w-100 fw-bold shadow-sm text-dark" id="mktModalBtn" style="border-radius: 6px; padding: 10px 0;">${mktData.button_text || 'Upgrade Now'}</a>
                 </div>
             </div>
-        </div>`;
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-        modalEl = document.getElementById('marketingUpgradeModal');
-    }
-
-    document.getElementById('mktModalTitle').innerText = mktData.display_name;
+        </div>
+    </div>`;
     
-    const benefitsHtml = mktData.benefits.split('\n').filter(b => b.trim() !== '').map(b => `<div class="mb-1 text-start" style="font-size: 13px;"><span class="material-icons-round text-success align-middle me-2" style="font-size:16px;">check_circle</span>${b}</div>`).join('');
-    document.getElementById('mktModalDesc').innerHTML = benefitsHtml;
-    
-    const btn = document.getElementById('mktModalBtn');
-    btn.innerText = mktData.button_text;
-    btn.href = mktData.button_link || '#';
-
-    // Inject automated Daily Sales Badge strictly
-    const badgeContainer = document.getElementById('mktModalSaleBadgeContainer');
-    if (badgeContainer) {
-        if (todaySaleText.trim() !== '') {
-            badgeContainer.innerHTML = `<div class="badge bg-danger text-white mb-3 p-2 px-3 w-100 shadow-sm" style="font-size: 13px; border-radius: 6px; animation: pulse 2s infinite;">🔥 ${todaySaleText}</div>`;
-        } else {
-            badgeContainer.innerHTML = '';
-        }
-    }
+    // Inject clean Modal to Body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    modalEl = document.getElementById('marketingUpgradeModal');
 
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
