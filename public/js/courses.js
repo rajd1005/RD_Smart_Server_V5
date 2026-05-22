@@ -2,8 +2,12 @@
 window.getTodaySalesLabel = function(settingsObj, level) {
     if (!settingsObj || !settingsObj.daily_sales_labels) return '';
     try {
-        let labels = JSON.parse(settingsObj.daily_sales_labels);
+        let labels = settingsObj.daily_sales_labels;
         
+        // Double-parse safeguard (Fixes nested JSON stringification issues)
+        if (typeof labels === 'string') labels = JSON.parse(labels);
+        if (typeof labels === 'string') labels = JSON.parse(labels); 
+
         // Cross-browser safe IST Date Calculation
         const now = new Date();
         const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -13,20 +17,19 @@ window.getTodaySalesLabel = function(settingsObj, level) {
         const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
         const currentISTDay = days[istDate.getDay()];
         
-        // Ensure clean string for matching
         const cleanLevel = level ? String(level).trim() : '';
 
-        // Contextually locate label data
-        let targetLabels = {};
-        if (cleanLevel && labels[cleanLevel]) {
-            targetLabels = labels[cleanLevel];
-        } else if (labels.prelogin !== undefined) {
-            targetLabels = {}; // Structure exists, but specific level is empty
-        } else {
-            targetLabels = labels; // Fallback to legacy flat format
+        // Try to get specific level labels
+        if (cleanLevel && labels[cleanLevel] && labels[cleanLevel][currentISTDay]) {
+            return labels[cleanLevel][currentISTDay];
+        }
+        
+        // Fallback to legacy flat format
+        if (labels[currentISTDay] && typeof labels[currentISTDay] === 'string') {
+            return labels[currentISTDay];
         }
 
-        return targetLabels[currentISTDay] || '';
+        return '';
     } catch(e) {
         return '';
     }
@@ -468,14 +471,16 @@ function moveWatermark() {
     wmEl.style.top = Math.floor(Math.random() * (maxY - minY + 1)) + minY + 'px';
 }
 
-// Fixed Modal DOM Caching Injection
+// Ensure clean dynamic injection of the Upgrade Marketing Modal without caching bugs
 window.showUpgradeMarketingModal = function(level) {
     const cleanLevel = level ? String(level).trim() : '';
     let mktData = { display_name: 'Premium', benefits: 'Unlock exclusive content.', button_text: 'Upgrade Now', button_link: '#' };
     
     if (window.appSettings && window.appSettings.level_marketing_config) {
         try {
-            const config = JSON.parse(window.appSettings.level_marketing_config);
+            let config = window.appSettings.level_marketing_config;
+            if (typeof config === 'string') config = JSON.parse(config);
+            if (typeof config === 'string') config = JSON.parse(config); // Double parse safeguard
             if (config[cleanLevel]) mktData = config[cleanLevel];
         } catch(e) {}
     }
@@ -485,41 +490,52 @@ window.showUpgradeMarketingModal = function(level) {
         todaySaleText = window.getTodaySalesLabel(window.appSettings, cleanLevel);
     }
 
-    // Forcefully remove old modal to prevent cross-level DOM caching issues
+    // Target the modal container if it exists, otherwise construct it
     let modalEl = document.getElementById('marketingUpgradeModal');
-    if (modalEl) {
-        modalEl.remove(); 
-    }
-
-    // Render Badge Natively inside Template Literal
-    const badgeHtml = (todaySaleText && todaySaleText.trim() !== '') ? 
-        `<div class="badge bg-danger text-white mb-3 p-2 px-3 w-100 shadow-sm" style="font-size: 13px; border-radius: 6px; animation: pulse 2s infinite;">🔥 ${todaySaleText}</div>` : '';
-
-    const benefitsHtml = (mktData.benefits || '').split('\n').filter(b => b.trim() !== '').map(b => `<div class="mb-2 text-start d-flex align-items-start" style="font-size: 13px;"><span class="material-icons-round text-success align-middle me-2" style="font-size:16px; margin-top:1px;">check_circle</span><span style="line-height:1.4;">${b}</span></div>`).join('');
-
-    const modalHtml = `
-    <div class="modal fade" id="marketingUpgradeModal" tabindex="-1" style="z-index: 1060;">
-        <div class="modal-dialog modal-dialog-centered" style="max-width: 320px;">
-            <div class="modal-content text-center" style="border-radius: 12px; border: none; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                <div class="modal-header border-0 pb-0 justify-content-center position-relative">
-                    <span class="material-icons-round text-warning" style="font-size: 48px; margin-top: 10px;">workspace_premium</span>
-                    <button type="button" class="btn-close position-absolute top-0 end-0 m-3" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body px-4 pb-4 pt-2">
-                    <h5 class="fw-bold mb-1" id="mktModalTitle" style="font-size: 18px;">${mktData.display_name || 'Upgrade Access'}</h5>
-                    
-                    <div id="mktModalSaleBadgeContainer" class="mt-2">${badgeHtml}</div>
-                    
-                    <div class="text-muted small mb-3 mt-2" id="mktModalDesc">${benefitsHtml || 'Get access to this locked content.'}</div>
-                    <a href="${mktData.button_link || '#'}" target="_blank" class="btn btn-warning w-100 fw-bold shadow-sm text-dark" id="mktModalBtn" style="border-radius: 6px; padding: 10px 0;">${mktData.button_text || 'Upgrade Now'}</a>
+    if (!modalEl) {
+        const modalHtml = `
+        <div class="modal fade" id="marketingUpgradeModal" tabindex="-1" style="z-index: 1060;">
+            <div class="modal-dialog modal-dialog-centered" style="max-width: 320px;">
+                <div class="modal-content text-center" style="border-radius: 12px; border: none; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                    <div class="modal-header border-0 pb-0 justify-content-center position-relative">
+                        <span class="material-icons-round text-warning" style="font-size: 48px; margin-top: 10px;">workspace_premium</span>
+                        <button type="button" class="btn-close position-absolute top-0 end-0 m-3" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body px-4 pb-4 pt-2">
+                        <h5 class="fw-bold mb-1" id="mktModalTitle" style="font-size: 18px;"></h5>
+                        
+                        <div id="mktModalSaleBadgeContainer" class="mt-2" style="display: none;"></div>
+                        
+                        <div class="text-muted small mb-3 mt-2" id="mktModalDesc"></div>
+                        <a href="#" target="_blank" class="btn btn-warning w-100 fw-bold shadow-sm text-dark" id="mktModalBtn" style="border-radius: 6px; padding: 10px 0;"></a>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>`;
-    
-    // Inject clean Modal to Body
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    modalEl = document.getElementById('marketingUpgradeModal');
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        modalEl = document.getElementById('marketingUpgradeModal');
+    }
 
+    // Update the DOM dynamically
+    document.getElementById('mktModalTitle').innerText = mktData.display_name || 'Upgrade Access';
+    
+    const benefitsHtml = (mktData.benefits || 'Get access to this locked content.').split('\n').filter(b => b.trim() !== '').map(b => `<div class="mb-2 text-start d-flex align-items-start" style="font-size: 13px;"><span class="material-icons-round text-success align-middle me-2" style="font-size:16px; margin-top:1px;">check_circle</span><span style="line-height:1.4;">${b}</span></div>`).join('');
+    document.getElementById('mktModalDesc').innerHTML = benefitsHtml;
+    
+    const btn = document.getElementById('mktModalBtn');
+    btn.innerText = mktData.button_text || 'Upgrade Now';
+    btn.href = mktData.button_link || '#';
+
+    // Strictly enforce the presence of the badge based on the active level
+    const badgeContainer = document.getElementById('mktModalSaleBadgeContainer');
+    if (todaySaleText && todaySaleText.trim() !== '') {
+        badgeContainer.innerHTML = `<div class="badge bg-danger text-white mb-3 p-2 px-3 w-100 shadow-sm" style="font-size: 13px; border-radius: 6px; animation: pulse 2s infinite;">🔥 ${todaySaleText}</div>`;
+        badgeContainer.style.display = 'block';
+    } else {
+        badgeContainer.innerHTML = '';
+        badgeContainer.style.display = 'none';
+    }
+
+    // Trigger the modal
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
