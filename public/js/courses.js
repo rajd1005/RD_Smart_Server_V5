@@ -1,3 +1,32 @@
+// Helper Function for Automated Daily Sales Labels (IST)
+window.getTodaySalesLabel = function(settingsObj, level) {
+    if (!settingsObj || !settingsObj.daily_sales_labels) return '';
+    try {
+        let labels = JSON.parse(settingsObj.daily_sales_labels);
+        
+        // Contextually locate label data
+        if (level && labels[level]) {
+            labels = labels[level];
+        } else if (labels.prelogin !== undefined) {
+            // New format detected, but specific level doesn't exist. Fallback empty.
+            return '';
+        }
+
+        // FIX: Cross-browser safe IST Date Calculation (Fixes iOS/Safari 'Invalid Date' bug)
+        const now = new Date();
+        const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+        const istOffset = 5.5 * 60 * 60 * 1000; // +5:30 IST
+        const istDate = new Date(utcTime + istOffset);
+        
+        const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const currentISTDay = days[istDate.getDay()];
+        
+        return labels[currentISTDay] || '';
+    } catch(e) {
+        return '';
+    }
+};
+
 document.addEventListener('show.bs.collapse', function (e) {
     if (!e.target.classList.contains('lesson-collapse')) {
         const firstLessonCollapse = e.target.querySelector('.lesson-collapse');
@@ -110,7 +139,7 @@ async function fetchCourses() {
                     
                     let mediaHtml = '';
                     let onClickAction = '';
-                    let pointerEv = 'pointer'; // Ensure it is clickable so the modal can trigger
+                    let pointerEv = 'pointer'; 
 
                     if (hasVideo) {
                         onClickAction = isLocked ? `onclick="if(typeof window.showUpgradeMarketingModal === 'function') { window.showUpgradeMarketingModal('${mod.required_level}'); } else { alert('⚠️ Locked. Please upgrade your access level.'); }"` : `onclick="openSecureVideo(${l.id})"`;
@@ -212,6 +241,9 @@ async function fetchCourses() {
             const settingsRes = await fetch('/api/settings');
             const settings = await settingsRes.json();
             
+            // Store globally for marketing popups
+            window.appSettings = settings;
+
             const defaultState = settings.accordion_state || 'first';
             setTimeout(() => { toggleAccordions(defaultState); }, 100);
             const adminSettingDropdown = document.getElementById('adminAccordionState');
@@ -249,9 +281,9 @@ async function fetchCourses() {
             const adminDisclaimerCheck = document.getElementById('adminShowDisclaimer');
             if (adminDisclaimerCheck) adminDisclaimerCheck.checked = showDisclaimer;
             safeSetVal('adminRegisterLink', settings.register_link);
-            safeSetVal('adminManagerEmails', settings.manager_emails); // NEW LINE
+            safeSetVal('adminManagerEmails', settings.manager_emails);
 
-            // --- ADD THIS TO POPULATE PRE-LOGIN MARKETING POPUP SETTINGS ---
+            // --- LOAD PRE-LOGIN MARKETING POPUP SETTINGS ---
             const loginPopupShow = settings.login_popup_show === 'true';
             const adminLoginPopupShowCheck = document.getElementById('adminLoginPopupShow');
             if (adminLoginPopupShowCheck) adminLoginPopupShowCheck.checked = loginPopupShow;
@@ -260,7 +292,20 @@ async function fetchCourses() {
             safeSetVal('adminLoginPopupDesc', settings.login_popup_desc);
             safeSetVal('adminLoginPopupBtnText', settings.login_popup_btn_text);
             safeSetVal('adminLoginPopupBtnLink', settings.login_popup_btn_link);
-            // ---------------------------------------------------------------
+            
+            // --- LOAD DAILY SALES LABELS ---
+            if (settings.daily_sales_labels) {
+                try {
+                    const parsed = JSON.parse(settings.daily_sales_labels);
+                    if (parsed.Mon !== undefined) {
+                        if(!window.salesLabelsData) window.salesLabelsData = {};
+                        window.salesLabelsData.prelogin = parsed;
+                    } else {
+                        window.salesLabelsData = { ...(window.salesLabelsData || {}), ...parsed };
+                    }
+                    if (typeof window.loadSalesLabelsConfig === 'function') window.loadSalesLabelsConfig();
+                } catch(e) {}
+            }
 
             const catForex = settings.cat_forex_crypto || '';
             const catStock = settings.cat_stock || '';
@@ -271,11 +316,6 @@ async function fetchCourses() {
             symbolCategories['Stock'] = catStock.split(',').map(s=>s.trim().toUpperCase()).filter(s=>s);
             symbolCategories['Index'] = catIndex.split(',').map(s=>s.trim().toUpperCase()).filter(s=>s);
             symbolCategories['Mcx'] = catMcx.split(',').map(s=>s.trim().toUpperCase()).filter(s=>s);
-
-            safeSetVal('adminCatForex', catForex);
-            safeSetVal('adminCatStock', catStock);
-            safeSetVal('adminCatIndex', catIndex);
-            safeSetVal('adminCatMcx', catMcx);
 
             if (allTrades && allTrades.length > 0) applyFilters(); 
 
@@ -292,7 +332,6 @@ async function fetchCourses() {
 
             const navTradeBtn = document.getElementById('navTradeBtn');
             if (navTradeBtn) {
-                // Modified to allow manager access
                 if (hideTradeTab && userData.role !== 'admin' && userData.role !== 'manager') navTradeBtn.style.display = 'none';
                 else navTradeBtn.style.display = 'flex';
             }
@@ -416,4 +455,65 @@ function moveWatermark() {
 
     wmEl.style.left = Math.floor(Math.random() * (maxX - minX + 1)) + minX + 'px';
     wmEl.style.top = Math.floor(Math.random() * (maxY - minY + 1)) + minY + 'px';
+}
+
+// Marketing Modal logic natively integrated
+window.showUpgradeMarketingModal = function(level) {
+    let mktData = { display_name: 'Premium', benefits: 'Unlock exclusive content.', button_text: 'Upgrade Now', button_link: '#' };
+    
+    if (window.appSettings && window.appSettings.level_marketing_config) {
+        try {
+            const config = JSON.parse(window.appSettings.level_marketing_config);
+            if (config[level]) mktData = config[level];
+        } catch(e) {}
+    }
+
+    let todaySaleText = '';
+    if (window.getTodaySalesLabel) {
+        todaySaleText = window.getTodaySalesLabel(window.appSettings, level);
+    }
+
+    let modalEl = document.getElementById('marketingUpgradeModal');
+    if (!modalEl) {
+        const modalHtml = `
+        <div class="modal fade" id="marketingUpgradeModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered" style="max-width: 320px;">
+                <div class="modal-content text-center">
+                    <div class="modal-header border-0 pb-0 justify-content-center">
+                        <span class="material-icons-round text-warning" style="font-size: 48px;">workspace_premium</span>
+                        <button type="button" class="btn-close position-absolute top-0 end-0 m-3" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body px-4 pb-4 pt-2">
+                        <h5 class="fw-bold mb-1" id="mktModalTitle">Upgrade Access</h5>
+                        <div id="mktModalSaleBadgeContainer"></div>
+                        <p class="text-muted small mb-3" id="mktModalDesc">Get access to this locked content.</p>
+                        <a href="#" target="_blank" class="btn btn-warning w-100 fw-bold shadow-sm text-dark" id="mktModalBtn">Upgrade Now</a>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        modalEl = document.getElementById('marketingUpgradeModal');
+    }
+
+    document.getElementById('mktModalTitle').innerText = mktData.display_name;
+    
+    const benefitsHtml = mktData.benefits.split('\n').filter(b => b.trim() !== '').map(b => `<div class="mb-1 text-start" style="font-size: 13px;"><span class="material-icons-round text-success align-middle me-2" style="font-size:16px;">check_circle</span>${b}</div>`).join('');
+    document.getElementById('mktModalDesc').innerHTML = benefitsHtml;
+    
+    const btn = document.getElementById('mktModalBtn');
+    btn.innerText = mktData.button_text;
+    btn.href = mktData.button_link || '#';
+
+    // Inject automated Daily Sales Badge strictly
+    const badgeContainer = document.getElementById('mktModalSaleBadgeContainer');
+    if (badgeContainer) {
+        if (todaySaleText.trim() !== '') {
+            badgeContainer.innerHTML = `<div class="badge bg-danger text-white mb-3 p-2 px-3 w-100 shadow-sm" style="font-size: 13px; border-radius: 6px; animation: pulse 2s infinite;">🔥 ${todaySaleText}</div>`;
+        } else {
+            badgeContainer.innerHTML = '';
+        }
+    }
+
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
